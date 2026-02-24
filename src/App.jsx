@@ -5,6 +5,7 @@ import { AuthProvider } from './context/AuthContext';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import DocumentEditor from './pages/DocumentEditor';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -17,7 +18,7 @@ function App() {
 
           <Route element={<ProtectedRoute />}>
             <Route path="/" element={<Dashboard />} />
-            {/* Add more protected routes here like /documents/:id later */}
+            <Route path="/d/:id" element={<DocumentEditor />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
