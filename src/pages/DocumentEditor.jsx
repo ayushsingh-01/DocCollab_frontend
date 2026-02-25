@@ -5,7 +5,8 @@ import api from '../api/axios';
 import { io } from 'socket.io-client';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
-import { ArrowLeft, Save, Share2, History, CloudLightning } from 'lucide-react';
+import { ArrowLeft, Save, Share2, History, CloudLightning, ChevronLeft, ChevronRight } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const DocumentEditor = () => {
     const { id } = useParams();
@@ -24,6 +25,14 @@ const DocumentEditor = () => {
     const [shareEmail, setShareEmail] = useState('');
     const [shareRole, setShareRole] = useState('viewer');
     const [isSharing, setIsSharing] = useState(false);
+
+    // Version History State
+    const [showHistoryModal, setShowHistoryModal] = useState(false);
+    const [versions, setVersions] = useState([]);
+    const [versionPage, setVersionPage] = useState(1);
+    const [versionTotalPages, setVersionTotalPages] = useState(1);
+    const [isLoadingVersions, setIsLoadingVersions] = useState(false);
+    const [isRestoring, setIsRestoring] = useState(false);
 
     const quillRef = useRef(null);
     const contentRef = useRef(content); // Store latest content to avoid dependency cycle in interval
@@ -74,28 +83,20 @@ const DocumentEditor = () => {
             setContent(incomingContent);
         });
 
+        // Cleanup on unmount (Back button or navigating away)
         return () => {
+            // If user has edit rights, save state to backend before completely leaving room
+            if (s.connected && !isReadOnly && contentRef.current) {
+                console.log("Saving before disconnect...")
+                s.emit('save-document', {
+                    documentId: id,
+                    content: contentRef.current,
+                    savedBy: user?._id
+                });
+            }
             s.disconnect();
         };
-    }, [document, id]);
-
-    // 3. Periodic Auto-Save
-    useEffect(() => {
-        if (!socket || isReadOnly) return;
-
-        const interval = setInterval(() => {
-            // Emit the latest content from our ref to avoid stale closures
-            socket.emit('save-document', {
-                documentId: id,
-                content: contentRef.current
-            });
-            console.log('Auto-saved to server via socket...');
-        }, 5000); // Save every 5 seconds
-
-        return () => {
-            clearInterval(interval);
-        };
-    }, [socket, isReadOnly, id]);
+    }, [document, id, isReadOnly, user?._id]);
 
     // Editor Change Handler
     const handleEditorChange = (newContent, delta, source, editor) => {
@@ -114,14 +115,23 @@ const DocumentEditor = () => {
         setIsSaving(true);
         try {
             await api.put(`/documents/${id}`, { content });
-            // Notify via socket as backup
-            socket?.emit('save-document', { documentId: id, content });
+            // Notify via socket as backup to spawn a version history item
+            socket?.emit('save-document', { documentId: id, content, savedBy: user?._id });
+            toast.success('Document saved explicitly');
         } catch (err) {
             console.error('Failed to save document', err);
-            alert('Error saving document');
+            toast.error('Error saving document');
         } finally {
             setIsSaving(false);
         }
+    };
+
+    const goBack = () => {
+        // Trigger save before navigating if not read only
+        if (!isReadOnly && socket) {
+            socket.emit('save-document', { documentId: id, content: contentRef.current, savedBy: user?._id });
+        }
+        navigate('/');
     };
 
     const handleShare = async (e) => {
@@ -131,15 +141,54 @@ const DocumentEditor = () => {
         setIsSharing(true);
         try {
             await api.post(`/documents/${id}/share`, { email: shareEmail, role: shareRole });
-            alert(`Successfully shared with ${shareEmail} as ${shareRole}`);
+            toast.success(`Successfully shared with ${shareEmail} as ${shareRole}`);
             setShowShareModal(false);
             setShareEmail('');
             // Optionally fetch document again to update the sharing list if displayed
         } catch (err) {
             console.error('Failed to share document', err);
-            alert(err.response?.data?.message || 'Error sharing document');
+            toast.error(err.response?.data?.message || 'Error sharing document');
         } finally {
             setIsSharing(false);
+        }
+    };
+
+    const fetchVersions = async (page = 1) => {
+        setIsLoadingVersions(true);
+        try {
+            const { data } = await api.get(`/documents/${id}/versions?page=${page}&limit=5`);
+            setVersions(data.versions);
+            setVersionPage(data.currentPage);
+            setVersionTotalPages(data.totalPages);
+        } catch (err) {
+            console.error('Failed to fetch versions', err);
+            toast.error('Failed to load version history');
+        } finally {
+            setIsLoadingVersions(false);
+        }
+    };
+
+    const handleOpenHistory = () => {
+        setShowHistoryModal(true);
+        fetchVersions(1);
+    };
+
+    const handleRestoreVersion = async (versionId) => {
+        if (!window.confirm('Are you sure you want to restore this version? Current unsaved changes will be lost.')) return;
+        setIsRestoring(true);
+        try {
+            const { data } = await api.post(`/documents/${id}/versions/${versionId}/restore`);
+            setContent(data.document.content);
+            if (socket) {
+                socket.emit('send-changes', { documentId: id, delta: data.document.content });
+            }
+            toast.success('Document restored successfully!');
+            setShowHistoryModal(false);
+        } catch (error) {
+            console.error('Failed to restore', error);
+            toast.error('Failed to restore document version');
+        } finally {
+            setIsRestoring(false);
         }
     };
 
@@ -162,7 +211,7 @@ const DocumentEditor = () => {
             {/* Editor Top Bar */}
             <header className="editor-header glass-card">
                 <div className="editor-header-left">
-                    <button onClick={() => navigate('/')} className="btn-icon" title="Back to Dashboard">
+                    <button onClick={goBack} className="btn-icon" title="Back to Dashboard">
                         <ArrowLeft size={20} />
                     </button>
                     <div className="editor-title-container">
@@ -197,7 +246,7 @@ const DocumentEditor = () => {
                         </button>
                     )}
 
-                    <button className="btn" style={{ background: 'var(--surface)' }} title="Version History">
+                    <button className="btn" style={{ background: 'var(--surface)' }} title="Version History" onClick={handleOpenHistory}>
                         <History size={16} />
                     </button>
                 </div>
@@ -274,6 +323,75 @@ const DocumentEditor = () => {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Version History Modal */}
+            {showHistoryModal && (
+                <div className="modal-overlay">
+                    <div className="glass-card modal-content" style={{ maxWidth: '600px' }}>
+                        <div className="modal-header">
+                            <h2>Version History</h2>
+                            <button className="btn-icon" onClick={() => setShowHistoryModal(false)}>
+                                <span style={{ fontSize: '1.5rem', lineHeight: 1 }}>&times;</span>
+                            </button>
+                        </div>
+
+                        <div style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '1rem' }}>
+                            {isLoadingVersions ? (
+                                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Loading versions...</div>
+                            ) : versions.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>No version history found.</div>
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                    {versions.map((ver) => (
+                                        <div key={ver._id} className="glass-card" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <div>
+                                                <div style={{ fontWeight: '500', marginBottom: '0.25rem' }}>
+                                                    {new Date(ver.createdAt).toLocaleString()}
+                                                </div>
+                                                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                                                    Saved by: {ver.savedBy?.username || 'Unknown'}
+                                                </div>
+                                            </div>
+                                            {!isReadOnly && (
+                                                <button
+                                                    className="btn btn-primary"
+                                                    style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}
+                                                    onClick={() => handleRestoreVersion(ver._id)}
+                                                    disabled={isRestoring}
+                                                >
+                                                    {isRestoring ? 'Restoring...' : 'Restore'}
+                                                </button>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {versionTotalPages > 1 && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+                                <button
+                                    className="btn btn-icon"
+                                    disabled={versionPage === 1 || isLoadingVersions}
+                                    onClick={() => fetchVersions(versionPage - 1)}
+                                >
+                                    <ChevronLeft size={20} />
+                                </button>
+                                <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                                    Page {versionPage} of {versionTotalPages}
+                                </span>
+                                <button
+                                    className="btn btn-icon"
+                                    disabled={versionPage === versionTotalPages || isLoadingVersions}
+                                    onClick={() => fetchVersions(versionPage + 1)}
+                                >
+                                    <ChevronRight size={20} />
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
