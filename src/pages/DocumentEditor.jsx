@@ -114,15 +114,15 @@ const DocumentEditor = () => {
         if (isReadOnly) return;
         setIsSaving(true);
         try {
-            await api.put(`/documents/${id}`, { content });
-            // Notify via socket as backup to spawn a version history item
+            // We only need to emit via socket since it handles both updating the master doc AND creating a version snapshot
             socket?.emit('save-document', { documentId: id, content, savedBy: user?._id });
             toast.success('Document saved explicitly');
         } catch (err) {
             console.error('Failed to save document', err);
             toast.error('Error saving document');
         } finally {
-            setIsSaving(false);
+            // Add a small delay to make the UI feel reactive
+            setTimeout(() => setIsSaving(false), 500);
         }
     };
 
@@ -253,8 +253,8 @@ const DocumentEditor = () => {
             </header>
 
             {/* Editor Canvas Area */}
-            <main className="editor-main" style={{ padding: '0' }}>
-                <div className="editor-canvas" style={{ maxWidth: '100%', height: 'calc(100vh - 70px)' }}>
+            <main className="editor-main">
+                <div className="editor-canvas">
                     <ReactQuill
                         ref={quillRef}
                         theme="snow"
@@ -263,7 +263,6 @@ const DocumentEditor = () => {
                         modules={modules}
                         readOnly={isReadOnly}
                         placeholder={isReadOnly ? "This document is empty." : "Start typing here..."}
-                        style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
                     />
                 </div>
             </main>
@@ -338,29 +337,53 @@ const DocumentEditor = () => {
                             </button>
                         </div>
 
-                        <div style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '1rem' }}>
+                        <div style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '0.5rem' }} className="custom-scrollbar">
                             {isLoadingVersions ? (
-                                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Loading versions...</div>
+                                <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+                                    <div className="loader" style={{ margin: '0 auto 1rem auto' }}></div>
+                                    Loading version history...
+                                </div>
                             ) : versions.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>No version history found.</div>
+                                <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+                                    <History size={48} style={{ opacity: 0.2, margin: '0 auto 1rem auto', display: 'block' }} />
+                                    No version history found yet.<br />
+                                    <span style={{ fontSize: '0.85rem' }}>Save the document to create your first version snapshot!</span>
+                                </div>
                             ) : (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                    {versions.map((ver) => (
-                                        <div key={ver._id} className="glass-card" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    {versions.map((ver, index) => (
+                                        <div
+                                            key={ver._id}
+                                            className="glass-card version-item"
+                                            style={{
+                                                padding: '1.25rem',
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                alignItems: 'center',
+                                                borderLeft: index === 0 && versionPage === 1 ? '3px solid var(--primary)' : '1px solid var(--border)',
+                                                background: index === 0 && versionPage === 1 ? 'rgba(56, 189, 248, 0.05)' : 'rgba(30, 41, 59, 0.5)'
+                                            }}
+                                        >
                                             <div>
-                                                <div style={{ fontWeight: '500', marginBottom: '0.25rem' }}>
-                                                    {new Date(ver.createdAt).toLocaleString()}
+                                                <div style={{ fontWeight: '600', marginBottom: '0.35rem', color: index === 0 && versionPage === 1 ? 'var(--primary)' : 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                    {new Date(ver.createdAt).toLocaleString(undefined, {
+                                                        weekday: 'short', month: 'short', day: 'numeric',
+                                                        hour: '2-digit', minute: '2-digit', second: '2-digit'
+                                                    })}
+                                                    {index === 0 && versionPage === 1 && <span className="role-badge owner" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>Latest</span>}
                                                 </div>
-                                                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                    Saved by: {ver.savedBy?.username || 'Unknown'}
+                                                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+                                                    <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--secondary)', display: 'inline-block', marginRight: '6px' }}></div>
+                                                    Saved by: <strong style={{ color: 'var(--text-light)', marginLeft: '4px' }}>{ver.savedBy?.username || 'Unknown'}</strong>
                                                 </div>
                                             </div>
                                             {!isReadOnly && (
                                                 <button
                                                     className="btn btn-primary"
-                                                    style={{ padding: '0.5rem 1rem', fontSize: '0.85rem' }}
+                                                    style={{ padding: '0.5rem 1rem', fontSize: '0.85rem', opacity: index === 0 && versionPage === 1 ? 0.3 : 1 }}
                                                     onClick={() => handleRestoreVersion(ver._id)}
-                                                    disabled={isRestoring}
+                                                    disabled={isRestoring || (index === 0 && versionPage === 1)}
+                                                    title={index === 0 && versionPage === 1 ? "This is the current version" : "Restore this version"}
                                                 >
                                                     {isRestoring ? 'Restoring...' : 'Restore'}
                                                 </button>

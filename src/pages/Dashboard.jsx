@@ -121,14 +121,22 @@ const Dashboard = () => {
                                 </div>
 
                                 <div className="doc-card-footer">
-                                    <span className="doc-edit-btn">
-                                        <Edit3 size={16} /> Open
-                                    </span>
+                                    <button
+                                        className="btn btn-primary"
+                                        style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', flex: 1 }}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            navigate(`/d/${doc._id}`);
+                                        }}
+                                    >
+                                        <Edit3 size={16} style={{ marginRight: '0.4rem' }} /> Open Document
+                                    </button>
                                     {isOwner && (
                                         <button
                                             className="btn-icon delete-btn"
                                             onClick={(e) => handleDeleteDocument(e, doc._id)}
                                             title="Delete document"
+                                            style={{ padding: '0.55rem', borderRadius: '8px', marginLeft: '0.5rem' }}
                                         >
                                             <Trash2 size={18} />
                                         </button>

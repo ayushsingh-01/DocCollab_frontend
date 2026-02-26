@@ -20,7 +20,13 @@ const Login = () => {
             await login(email, password);
             navigate('/');
         } catch (err) {
-            setError(err.response?.data?.message || 'Invalid credentials');
+            // Handle specifically formatted Zod validation errors from backend
+            if (err.response?.data?.errors && Array.isArray(err.response.data.errors)) {
+                const messages = err.response.data.errors.map(e => e.message).join(', ');
+                setError(`Validation error: ${messages}`);
+            } else {
+                setError(err.response?.data?.message || 'Invalid credentials');
+            }
         } finally {
             setIsLoading(false);
         }
@@ -43,6 +49,7 @@ const Login = () => {
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             required
+                            autoComplete="username"
                         />
                     </div>
                     <div className="input-group">
@@ -53,6 +60,7 @@ const Login = () => {
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             required
+                            autoComplete="current-password"
                         />
                     </div>
                     <button type="submit" disabled={isLoading} className="btn btn-primary btn-block">
